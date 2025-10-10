@@ -1,0 +1,119 @@
+
+version: '3.8'
+
+services:
+  # Aplicación VIRA
+  vira-app:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - vira-network
+
+  # Base de datos PostgreSQL (alternativa a Supabase para desarrollo local)
+  postgres:
+    image: postgres:14-alpine
+    container_name: vira-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: vira_development
+      POSTGRES_USER: vira_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-vira_secure_password_123}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./DATABASE/supabase_schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ./DATABASE/sample_data.sql:/docker-entrypoint-initdb.d/02-data.sql
+    restart: unless-stopped
+    networks:
+      - vira-network
+
+  # Redis para caching y jobs
+  redis:
+    image: redis:7-alpine
+    container_name: vira-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - vira-network
+
+  # pgAdmin para administración de BD (opcional)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: vira-pgadmin
+    ports:
+      - "8080:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@vira.local
+      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    restart: unless-stopped
+    networks:
+      - vira-network
+    profiles:
+      - tools
+
+  # Nginx reverse proxy (para producción)
+  nginx:
+    image: nginx:alpine
+    container_name: vira-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - vira-app
+    restart: unless-stopped
+    networks:
+      - vira-network
+    profiles:
+      - production
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+networks:
+  vira-network:
+    driver: bridge
+
+# Configuraciones para diferentes entornos
+---
+
+# Para desarrollo local:
+# docker-compose up vira-app postgres redis
+
+# Con herramientas de administración:
+# docker-compose --profile tools up
+
+# Para producción completa:
+# docker-compose --profile production up
+
+# Variables de entorno requeridas en .env:
+# DB_PASSWORD=tu_password_postgres
+# NODE_ENV=development|production
+# + todas las variables de VIRA (ver variables-entorno-ejemplo.env)
