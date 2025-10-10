@@ -1,0 +1,16 @@
+# Fuente de ruedas CPU de PyTorch para instalaciones más rápidas sin CUDA
+--index-url https://download.pytorch.org/whl/cpu
+
+# Dependencias principales del proyecto
+TTS
+torch
+flask
+flask-cors
+requests
+
+# Paquetes comunes que TTS usa y aceleran la resolución si se listan explícitamente
+numpy
+scipy
+librosa
+soundfile
+pydantic
