@@ -125,7 +125,7 @@ export function Navigation() {
               </div>
               <div className="hidden md:block text-left">
                 <div className="text-sm font-medium text-gray-900">
-                  {session?.user?.name || 'Usuario'}
+                  {(session?.user as any)?.nombre_completo ?? session?.user?.name ?? 'Usuario'}
                 </div>
                 <div className="text-xs text-gray-500">
                   {session?.user?.email || 'usuario@vira.cl'}
@@ -139,7 +139,7 @@ export function Navigation() {
                 <div className="py-1">
                   <div className="px-4 py-3 border-b border-gray-100">
                     <p className="text-sm font-medium text-gray-900">
-                      {session?.user?.name || 'Usuario'}
+                      {(session?.user as any)?.nombre_completo ?? session?.user?.name ?? 'Usuario'}
                     </p>
                     <p className="text-xs text-gray-500">
                       {session?.user?.email || 'usuario@vira.cl'}
