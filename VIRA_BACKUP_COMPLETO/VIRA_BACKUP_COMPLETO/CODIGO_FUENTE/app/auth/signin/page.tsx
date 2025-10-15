@@ -1,7 +1,7 @@
 
 'use client'
 
-import { signIn } from 'next-auth/react'
+// Removemos NextAuth para usar Supabase Auth directamente
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
@@ -22,38 +22,55 @@ export default function SignIn() {
     setIsLoading(true)
     
     try {
-      // Validar contra Supabase en la tabla "usuarios" por email y contraseña
-      const { data, error } = await supabase
+      // 1) Validar contra Supabase en la tabla "usuarios" por email y contraseña
+      const { data: usuario, error: usuarioError } = await supabase
         .from('usuarios')
         .select('*')
         .eq('email', email)
         .eq('contraseña', password)
         .maybeSingle()
 
-      // Dentro de handleSubmit
-      if (error) {
-        console.error('Supabase auth error:', error)
+      if (usuarioError) {
+        console.error('Supabase usuarios error:', usuarioError)
         Swal.fire({ icon: 'error', title: 'Error de autenticación', text: 'Intenta nuevamente.' })
         return
       }
       
-      if (!data) {
+      if (!usuario) {
         Swal.fire({ icon: 'error', title: 'Credenciales incorrectas', text: 'Verifica tu email y contraseña.' })
         return
       }
 
-      // Si la validación en Supabase fue exitosa, continuar con NextAuth
-      const result = await signIn('credentials', {
+      // 2) Intentar iniciar sesión en Supabase Auth si el usuario ya existe
+      const signInRes = await supabase.auth.signInWithPassword({ email, password })
+      if (signInRes?.data?.user) {
+        await exportLoginVariables(signInRes.data.user, usuario, signInRes.data.session, email)
+        router.push('/')
+        router.refresh()
+        return
+      }
+
+      // 3) Si no existe en Supabase Auth, crearlo y luego iniciar sesión
+      const signUpRes = await supabase.auth.signUp({
         email,
-        password,
-        redirect: false,
+        password
       })
 
-      if (result?.ok) {
+      if (signUpRes.error) {
+        console.error('Supabase signUp error:', signUpRes.error)
+        Swal.fire({ icon: 'error', title: 'No se pudo crear la cuenta', text: 'Intenta nuevamente.' })
+        return
+      }
+
+      // 4) Intentar nuevamente iniciar sesión
+      const signInAfterSignUp = await supabase.auth.signInWithPassword({ email, password })
+      if (signInAfterSignUp?.data?.user) {
+        await exportLoginVariables(signInAfterSignUp.data.user, usuario, signInAfterSignUp.data.session, email)
         router.push('/')
         router.refresh()
       } else {
-        Swal.fire({ icon: 'error', title: 'Error al iniciar sesión', text: 'Verifica tus credenciales.' })
+        // Si el proyecto requiere confirmación de email, avisar al usuario
+        Swal.fire({ icon: 'info', title: 'Verifica tu correo', text: 'Debes confirmar tu email para iniciar sesión.' })
       }
     } catch (error) {
       console.error('Login error:', error)
@@ -63,24 +80,50 @@ export default function SignIn() {
     }
   }
 
-  // Login automático para desarrollo/demo
+  // Login automático para desarrollo/demo usando Supabase Auth
   const handleDemoLogin = async () => {
     setIsLoading(true)
     try {
-      const result = await signIn('credentials', {
+      const result = await supabase.auth.signInWithPassword({
         email: 'demo@vira.cl',
         password: 'demo123',
-        redirect: false,
       })
 
-      if (result?.ok) {
+      if (result?.data?.user) {
+        await exportLoginVariables(result.data.user, null, result.data.session, 'demo@vira.cl')
         router.push('/')
         router.refresh()
+      } else if (result?.error) {
+        Swal.fire({ icon: 'error', title: 'Demo no disponible', text: 'Revisa las credenciales demo.' })
       }
     } catch (error) {
       console.error('Demo login error:', error)
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  // Exportar solo el email en LocalStorage para uso posterior
+  const exportLoginVariables = async (
+    supaUser: any,
+    usuario: any,
+    _session: any,
+    fallbackEmail: string
+  ) => {
+    const emailToStore = supaUser?.email ?? usuario?.email ?? fallbackEmail
+    try {
+      localStorage.setItem('vira_user_email', emailToStore ?? '')
+      // Log de los datos exportados
+      console.log('[VIRA] Datos exportados tras login:', {
+        email: emailToStore ?? '',
+        localStorageKey: 'vira_user_email',
+        timestamp: new Date().toISOString(),
+      })
+      // Opcional: emitir evento por si otros componentes quieren reaccionar
+      window.dispatchEvent(new CustomEvent('vira:email', { detail: { email: emailToStore ?? '' } }))
+      console.log('[VIRA] Evento emitido: vira:email', { email: emailToStore ?? '' })
+    } catch (err) {
+      console.error('No se pudo guardar el email en LocalStorage:', err)
     }
   }
 

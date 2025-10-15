@@ -34,6 +34,8 @@ interface Plantilla {
   categorias: string[]
   voz: string
   cantidad_fuentes: FuenteSeleccionada[] // Array JSON compatible con Supabase JSONB
+  // Nuevo campo opcional para reflejar la columna de usuario en Supabase
+  usuario?: string
   created_at?: string
   updated_at?: string
 }
@@ -147,9 +149,24 @@ export default function PlantillasPage() {
   const cargarPlantillas = async () => {
     setLoading(true)
     try {
-      const { data: plantillas, error } = await supabase
+      // Leer email almacenado en LocalStorage para filtrar por usuario e incluir 'todos'
+      let storedEmail: string | null = null
+      try {
+        storedEmail = typeof window !== 'undefined' ? localStorage.getItem('vira_user_email') : null
+      } catch (e) {
+        console.warn('[Plantillas] No se pudo leer vira_user_email de LocalStorage:', e)
+      }
+
+      let plantillasQuery = supabase
         .from('plantillas')
         .select('*')
+
+      if (storedEmail && storedEmail.trim() !== '') {
+        // Incluir plantillas del usuario y las globales (usuario = 'todos')
+        plantillasQuery = plantillasQuery.or(`usuario.eq.${storedEmail},usuario.eq.todos`)
+      }
+
+      const { data: plantillas, error } = await plantillasQuery
         .order('created_at', { ascending: false })
       
       if (error) {

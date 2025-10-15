@@ -22,6 +22,8 @@ interface Plantilla {
   duracion: number
   categorias: string[]
   voz: string
+  // Nuevo campo opcional para reflejar la columna de usuario (si existe)
+  usuario?: string
   created_at?: string
   updated_at?: string
 }
@@ -166,9 +168,24 @@ export default function AutomatizacionPage() {
   const cargarPlantillas = async () => {
     setLoadingPlantillas(true)
     try {
-      const { data: plantillas, error } = await supabase
+      // Leer email almacenado para filtrar por usuario (incluye 'todos')
+      let storedEmail: string | null = null
+      try {
+        storedEmail = typeof window !== 'undefined' ? localStorage.getItem('vira_user_email') : null
+      } catch (e) {
+        console.warn('[Automatización] No se pudo leer vira_user_email de LocalStorage:', e)
+      }
+
+      let plantillasQuery = supabase
         .from('plantillas')
         .select('*')
+
+      if (storedEmail && storedEmail.trim() !== '') {
+        // Filtrar por coincidencia de usuario o globales
+        plantillasQuery = plantillasQuery.or(`usuario.eq.${storedEmail},usuario.eq.todos`)
+      }
+
+      const { data: plantillas, error } = await plantillasQuery
         .order('created_at', { ascending: false })
       
       if (error) {
@@ -190,9 +207,24 @@ export default function AutomatizacionPage() {
   const cargarProgramados = async () => {
     setLoadingProgramados(true)
     try {
-      const { data, error } = await supabase
+      // Leer email almacenado para filtrar por destinatario (incluye 'todos')
+      let storedEmail: string | null = null
+      try {
+        storedEmail = typeof window !== 'undefined' ? localStorage.getItem('vira_user_email') : null
+      } catch (e) {
+        console.warn('[Automatización] No se pudo leer vira_user_email de LocalStorage:', e)
+      }
+
+      let programadosQuery = supabase
         .from('programados')
         .select('*')
+
+      if (storedEmail && storedEmail.trim() !== '') {
+        // Filtrar por email del usuario o registros globales
+        programadosQuery = programadosQuery.or(`usuario.eq.${storedEmail},usuario.eq.todos`)
+      }
+
+      const { data, error } = await programadosQuery
         .order('id', { ascending: false })
       if (error) {
         console.error('Error al cargar programados:', error.message)

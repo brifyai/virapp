@@ -49,7 +49,7 @@ interface UserProfile {
   address?: string
   city?: string
   country?: string
-  role: 'admin' | 'user' | 'operator'
+  role: 'administrador' | 'super-administrador'
   plan: 'free' | 'basic' | 'pro' | 'enterprise'
   avatar?: string
   createdAt: string
@@ -184,12 +184,33 @@ export default function PerfilPage() {
   const [activeTab, setActiveTab] = useState('perfil')
   const [isLoading, setIsLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
-
+  const [storedEmail, setStoredEmail] = useState<string | null>(null)
+  const [isEditingProfile, setIsEditingProfile] = useState(false)
+  const [isCreateUserOpen, setIsCreateUserOpen] = useState(false)
+ 
+  // Inicializa storedEmail desde localStorage y escucha eventos 'vira:email'
   useEffect(() => {
-    if (!session?.user?.email) return
+    try {
+      const email = localStorage.getItem('vira_user_email')
+      if (email) setStoredEmail(email)
+    } catch (err) {
+      console.error('[Perfil] No se pudo leer vira_user_email de LocalStorage:', err)
+    }
+
+    const handler = (e: any) => {
+      const email = e?.detail?.email
+      if (typeof email === 'string') setStoredEmail(email)
+    }
+    window.addEventListener('vira:email', handler)
+    return () => window.removeEventListener('vira:email', handler)
+  }, [])
+
+  // Consulta a Supabase usando storedEmail y actualiza el perfil
+  useEffect(() => {
+    if (!storedEmail) return
     setIsLoading(true)
 
-    const email = session.user.email
+    const email = storedEmail
     ;(async () => {
       const { data, error } = await supabase
         .from('usuarios')
@@ -205,27 +226,59 @@ export default function PerfilPage() {
         setUserProfile(prev => ({
           ...prev,
           id: data.id ?? prev.id,
-          name: (data.nombre_completo) as string,
-          email: (data.email ) as string,
-          phone: (data.telefono ) as string | undefined,
-          company: (data.empresa ) as string | undefined,
-          address: (data.direccion ) as string | undefined,
-          city: (data.ciudad ) as string | undefined,
-          country: (data.pais ) as string | undefined,
-          role: (data.rol ?? data.role ?? prev.role) as 'admin' | 'user' | 'operator',
+          name: (data.nombre_completo ?? prev.name ?? 'Sin datos') as string,
+          email: (data.email ?? prev.email ?? email ?? 'Sin datos') as string,
+          phone: ((data.telefono ?? prev.phone) ?? 'Sin datos') as string,
+          company: ((data.empresa ?? prev.company) ?? 'Sin datos') as string,
+          address: ((data.direccion ?? prev.address) ?? 'Sin datos') as string,
+          city: ((data.ciudad ?? prev.city) ?? 'Sin datos') as string,
+          country: ((data.pais ?? prev.country) ?? 'Sin datos') as string,
+          role: (data.rol ?? data.role ?? prev.role) as 'administrador' | 'super-administrador',
           plan: (data.plan ?? prev.plan) as 'free' | 'basic' | 'pro' | 'enterprise',
-          avatar: (data.avatar ?? prev.avatar) as string | undefined,
-          createdAt: (data.created_at ?? data.createdAt ?? prev.createdAt) as string,
-          lastLogin: (data.last_login ?? data.lastLogin ?? prev.lastLogin) as string,
+          avatar: (data.avatar ?? prev.avatar ?? 'Sin datos') as string,
+          createdAt: (data.created_at ?? data.createdAt ?? prev.createdAt ?? 'Sin datos') as string,
+          lastLogin: (data.last_login ?? data.lastLogin ?? prev.lastLogin ?? 'Sin datos') as string,
           isActive: (typeof data.estado === 'boolean' ? data.estado : (typeof data.isActive === 'boolean' ? data.isActive : prev.isActive)) as boolean
         }))
       }
       setIsLoading(false)
     })()
-  }, [session?.user?.email])
+  }, [storedEmail])
 
-  const [isEditingProfile, setIsEditingProfile] = useState(false)
-  const [isCreateUserOpen, setIsCreateUserOpen] = useState(false)
+  // Registros de facturación donde integrantes incluye el correo almacenado
+  const [facturacionRegistros, setFacturacionRegistros] = useState<any[]>([])
+const [hasAutoAppliedBilling, setHasAutoAppliedBilling] = useState(false)
+
+  // Consultar facturación al iniciar/actualizar storedEmail: buscar registros donde integrantes JSONB contenga el correo almacenado
+  useEffect(() => {
+    const fetchFacturacion = async () => {
+      try {
+        if (!storedEmail) return
+
+        // Intentar primero con la tabla "facturación" (con acento)
+        console.log(storedEmail)
+        const filtroJSON = JSON.stringify([
+          {"Correo": storedEmail}
+        ])
+        const { data, error } = await supabase
+          .from('facturacion')
+          .select('*')
+          .contains('integrantes', filtroJSON)
+          console.log(data)
+
+        if (error) {
+          console.warn('[Perfil] Error consultando tabla "facturación":', error)
+        } else {
+          setFacturacionRegistros(Array.isArray(data) ? data : [])
+          console.log('[Perfil] Registros de facturación (tabla "facturación"):', data)
+        }
+      } catch (err) {
+        console.error('[Perfil] Error inesperado al consultar facturación:', err)
+      }
+    }
+
+    fetchFacturacion()
+  }, [storedEmail])
 
   // Estados del perfil
   const [userProfile, setUserProfile] = useState<UserProfile>({
@@ -237,7 +290,7 @@ export default function PerfilPage() {
     address: '',
     city: '',
     country: '',
-    role: 'user',
+    role: 'administrador',
     plan: 'free',
     createdAt: '',
     lastLogin: '',
@@ -255,6 +308,15 @@ export default function PerfilPage() {
     phone: '+56 2 2234 5678',
     email: 'facturacion@radioexample.cl'
   })
+
+  // Auto: colocar información de facturación en el formulario cuando se obtienen registros
+  useEffect(() => {
+    if (!hasAutoAppliedBilling && Array.isArray(facturacionRegistros) && facturacionRegistros.length > 0) {
+      const info = mapRecordToBillingInfo(facturacionRegistros[0])
+      setBillingInfo(info)
+      setHasAutoAppliedBilling(true)
+    }
+  }, [facturacionRegistros, hasAutoAppliedBilling])
 
   const [paymentHistory] = useState<PaymentHistory[]>([
     {
@@ -293,7 +355,7 @@ export default function PerfilPage() {
       id: '2',
       name: 'María González',
       email: 'maria@radioexample.cl',
-      role: 'operator',
+      role: 'administrador',
       lastLogin: '2024-09-04',
       isActive: true
     },
@@ -301,7 +363,7 @@ export default function PerfilPage() {
       id: '3',
       name: 'Carlos Rodríguez',
       email: 'carlos@radioexample.cl',
-      role: 'user',
+      role: 'administrador',
       lastLogin: '2024-09-03',
       isActive: true
     }
@@ -310,9 +372,13 @@ export default function PerfilPage() {
   const [newUser, setNewUser] = useState({
     name: '',
     email: '',
-    role: 'user' as 'admin' | 'user' | 'operator',
+    role: 'administrador' as 'administrador' | 'super-administrador',
     sendInvite: true
   })
+
+  const [addUserEmail, setAddUserEmail] = useState('')
+  const [addUserPassword, setAddUserPassword] = useState('')
+  const [addUserRole, setAddUserRole] = useState('administrador')
 
   const formatCurrency = (amount: number, currency: string = 'CLP') => {
     return new Intl.NumberFormat('es-CL', {
@@ -331,18 +397,16 @@ export default function PerfilPage() {
 
   const getRoleName = (role: string) => {
     const roles = {
-      'admin': 'Administrador',
-      'user': 'Usuario',
-      'operator': 'Operador'
+      'administrador': 'Administrador',
+      'super-administrador': 'Super Administrador'
     }
     return roles[role as keyof typeof roles] || role
   }
 
   const getRoleColor = (role: string) => {
     const colors = {
-      'admin': 'bg-red-100 text-red-800',
-      'user': 'bg-blue-100 text-blue-800',
-      'operator': 'bg-green-100 text-green-800'
+      'administrador': 'bg-red-100 text-red-800',
+      'super-administrador': 'bg-purple-100 text-purple-800'
     }
     return colors[role as keyof typeof colors] || 'bg-gray-100 text-gray-800'
   }
@@ -385,14 +449,82 @@ export default function PerfilPage() {
     return methods[method as keyof typeof methods] || method
   }
 
+  // Mapeo seguro del registro de facturación a BillingInfo para mostrar en el h3
+  const mapRecordToBillingInfo = (rec: any): BillingInfo => {
+    return {
+      legalName: rec?.razon_social ?? rec?.empresa ?? rec?.legalName ?? '',
+      taxId: rec?.rut ?? rec?.taxId ?? rec?.rut_empresa ?? '',
+      address: rec?.direccion_fiscal ?? rec?.address ?? '',
+      city: rec?.ciudad ?? rec?.city ?? '',
+      state: rec?.region ?? rec?.state ?? rec?.estado ?? '',
+      country: rec?.pais ?? '',
+      postalCode: rec?.codigo_postal ?? rec?.postalCode ?? '',
+      phone: rec?.telefono_facturacion ?? rec?.phone ?? '',
+      email: rec?.email_facturacion ?? rec?.correo ?? ''
+    }
+  }
+
   const handleSaveProfile = async () => {
     setIsLoading(true)
     try {
-      // Simular guardado
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      if (!storedEmail) {
+        alert('No se pudo identificar tu usuario (storedEmail no disponible).')
+        return
+      }
+
+      // Construir objeto de actualización para la tabla 'usuarios'
+      const updates = {
+        nombre_completo: userProfile.name || null,
+        email: userProfile.email || null,
+        telefono: userProfile.phone || null,
+        empresa: userProfile.company || null,
+        direccion: userProfile.address || null,
+        ciudad: userProfile.city || null,
+        pais: userProfile.country || null
+      }
+
+      // Actualizar datos del perfil en la tabla 'usuarios'
+      const { data, error } = await supabase
+        .from('usuarios')
+        .update(updates)
+        .eq('email', storedEmail)
+        .select()
+        .maybeSingle()
+
+      if (error) {
+        console.error('[Perfil] Error al actualizar perfil en tabla usuarios:', error)
+        alert('Error al actualizar el perfil en la base de datos')
+        return
+      }
+
+      // Actualizar nombre para mostrar y teléfono en Supabase Auth (user_metadata)
+      const { error: authError } = await supabase.auth.updateUser({
+        data: {
+          full_name: userProfile.name || undefined,
+          name: userProfile.name || undefined,
+          Phone: userProfile.phone || undefined,
+        }
+      })
+
+      if (authError) {
+        console.warn('[Perfil] No se pudo actualizar datos en Supabase Auth:', authError)
+      }
+
+      // Sincronizar storedEmail si el email cambió
+      if (userProfile.email && userProfile.email !== storedEmail) {
+        try {
+          localStorage.setItem('vira_user_email', userProfile.email)
+          setStoredEmail(userProfile.email)
+          window.dispatchEvent(new CustomEvent('vira:email', { detail: { email: userProfile.email } }))
+        } catch (err) {
+          console.warn('[Perfil] No se pudo sincronizar storedEmail con el nuevo email:', err)
+        }
+      }
+
       setIsEditingProfile(false)
       alert('Perfil actualizado exitosamente')
     } catch (error) {
+      console.error('[Perfil] Error inesperado al guardar el perfil:', error)
       alert('Error al actualizar el perfil')
     } finally {
       setIsLoading(false)
@@ -410,10 +542,59 @@ export default function PerfilPage() {
       // Simular creación de usuario
       await new Promise(resolve => setTimeout(resolve, 1000))
       setIsCreateUserOpen(false)
-      setNewUser({ name: '', email: '', role: 'user', sendInvite: true })
+      setNewUser({ name: '', email: '', role: 'administrador', sendInvite: true })
       alert('Usuario creado exitosamente. Se ha enviado una invitación por email.')
     } catch (error) {
       alert('Error al crear el usuario')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Nuevo: agregar usuario desde el formulario inferior (email + contraseña)
+  const handleAddUser = async () => {
+    if (!addUserEmail || !addUserPassword || !addUserRole) {
+      alert('Por favor completa el email, la contraseña y el rol')
+      return
+    }
+    
+    setIsLoading(true)
+    try {
+      // Insertar nuevo usuario en la tabla 'usuarios' con campos vacíos para los no gestionados por el super-administrador
+      const { data, error } = await supabase
+        .from('usuarios')
+        .insert([
+          {
+            email: addUserEmail,
+            contraseña: addUserPassword,
+            rol: addUserRole,
+            telefono: '',
+            empresa: '',
+            nombre_completo: '',
+            direccion: '',
+            ciudad: '',
+            pais: '',
+            estado: null,
+          },
+        ])
+        .select()
+        .maybeSingle()
+  
+      if (error) {
+        console.error('[Perfil] Error al insertar usuario en Supabase:', error)
+        alert('Error al agregar usuario')
+        return
+      }
+  
+      // Limpiar formulario
+      setAddUserEmail('')
+      setAddUserPassword('')
+      setAddUserRole('administrador')
+  
+      alert('Usuario agregado exitosamente.')
+    } catch (error) {
+      console.error('[Perfil] Error al agregar usuario:', error)
+      alert('Error al agregar usuario')
     } finally {
       setIsLoading(false)
     }
@@ -503,23 +684,9 @@ export default function PerfilPage() {
                     <Input
                       value={userProfile.name}
                       placeholder={userProfile.name ? undefined : 'sin datos'}
-                      onChange={async (e) => {
+                      onChange={(e) => {
                         const newName = e.target.value
                         setUserProfile(prev => ({ ...prev, name: newName }))
-                        if (session?.user?.email) {
-                          const { data, error } = await supabase
-                            .from('usuarios')
-                            .update({ nombre_completo: newName })
-                            .eq('email', session.user.email)
-                            .select()
-                            .maybeSingle()
-                          console.log('[Perfil] Actualización nombre_completo:', { newName, data, error })
-                          if (error) {
-                            console.error('[Perfil] Error al actualizar nombre_completo en Supabase:', error)
-                          }
-                        } else {
-                          console.warn('[Perfil] No hay email de sesión disponible para actualizar nombre_completo')
-                        }
                       }}
                       disabled={!isEditingProfile}
                       className="mt-1"
@@ -531,23 +698,9 @@ export default function PerfilPage() {
                       type="email"
                       value={userProfile.email}
                       placeholder={userProfile.email ? undefined : 'sin datos'}
-                      onChange={async (e) => {
+                      onChange={(e) => {
                         const newEmail = e.target.value
                         setUserProfile(prev => ({ ...prev, email: newEmail }))
-                        if (session?.user?.email) {
-                          const { data, error } = await supabase
-                            .from('usuarios')
-                            .update({ email: newEmail })
-                            .eq('email', session.user.email)
-                            .select()
-                            .maybeSingle()
-                          console.log('[Perfil] Actualización email:', { newEmail, data, error })
-                          if (error) {
-                            console.error('[Perfil] Error al actualizar email en Supabase:', error)
-                          }
-                        } else {
-                          console.warn('[Perfil] No hay email de sesión disponible para actualizar email')
-                        }
                       }}
                       disabled={!isEditingProfile}
                       className="mt-1"
@@ -558,23 +711,9 @@ export default function PerfilPage() {
                     <Input
                       value={userProfile.phone || ''}
                       placeholder={userProfile.phone ? undefined : 'sin datos'}
-                      onChange={async (e) => {
+                      onChange={(e) => {
                         const newPhone = e.target.value
                         setUserProfile(prev => ({ ...prev, phone: newPhone }))
-                        if (session?.user?.email) {
-                          const { data, error } = await supabase
-                            .from('usuarios')
-                            .update({ telefono: newPhone })
-                            .eq('email', session.user.email)
-                            .select()
-                            .maybeSingle()
-                          console.log('[Perfil] Actualización telefono:', { newPhone, data, error })
-                          if (error) {
-                            console.error('[Perfil] Error al actualizar telefono en Supabase:', error)
-                          }
-                        } else {
-                          console.warn('[Perfil] No hay email de sesión disponible para actualizar telefono')
-                        }
                       }}
                       disabled={!isEditingProfile}
                       className="mt-1"
@@ -585,23 +724,9 @@ export default function PerfilPage() {
                     <Input
                       value={userProfile.company || ''}
                       placeholder={userProfile.company ? undefined : 'sin datos'}
-                      onChange={async (e) => {
+                      onChange={(e) => {
                         const newCompany = e.target.value
                         setUserProfile(prev => ({ ...prev, company: newCompany }))
-                        if (session?.user?.email) {
-                          const { data, error } = await supabase
-                            .from('usuarios')
-                            .update({ empresa: newCompany })
-                            .eq('email', session.user.email)
-                            .select()
-                            .maybeSingle()
-                          console.log('[Perfil] Actualización empresa:', { newCompany, data, error })
-                          if (error) {
-                            console.error('[Perfil] Error al actualizar empresa en Supabase:', error)
-                          }
-                        } else {
-                          console.warn('[Perfil] No hay email de sesión disponible para actualizar empresa')
-                        }
                       }}
                       disabled={!isEditingProfile}
                       className="mt-1"
@@ -612,23 +737,9 @@ export default function PerfilPage() {
                     <Input
                       value={userProfile.address || ''}
                       placeholder={userProfile.address ? undefined : 'sin datos'}
-                      onChange={async (e) => {
+                      onChange={(e) => {
                         const newAddress = e.target.value
                         setUserProfile(prev => ({ ...prev, address: newAddress }))
-                        if (session?.user?.email) {
-                          const { data, error } = await supabase
-                            .from('usuarios')
-                            .update({ direccion: newAddress })
-                            .eq('email', session.user.email)
-                            .select()
-                            .maybeSingle()
-                          console.log('[Perfil] Actualización direccion:', { newAddress, data, error })
-                          if (error) {
-                            console.error('[Perfil] Error al actualizar direccion en Supabase:', error)
-                          }
-                        } else {
-                          console.warn('[Perfil] No hay email de sesión disponible para actualizar direccion')
-                        }
                       }}
                       disabled={!isEditingProfile}
                       className="mt-1"
@@ -639,23 +750,9 @@ export default function PerfilPage() {
                     <Input
                       value={userProfile.city || ''}
                       placeholder={userProfile.city ? undefined : 'sin datos'}
-                      onChange={async (e) => {
+                      onChange={(e) => {
                         const newCity = e.target.value
                         setUserProfile(prev => ({ ...prev, city: newCity }))
-                        if (session?.user?.email) {
-                          const { data, error } = await supabase
-                            .from('usuarios')
-                            .update({ ciudad: newCity })
-                            .eq('email', session.user.email)
-                            .select()
-                            .maybeSingle()
-                          console.log('[Perfil] Actualización ciudad:', { newCity, data, error })
-                          if (error) {
-                            console.error('[Perfil] Error al actualizar ciudad en Supabase:', error)
-                          }
-                        } else {
-                          console.warn('[Perfil] No hay email de sesión disponible para actualizar ciudad')
-                        }
                       }}
                       disabled={!isEditingProfile}
                       className="mt-1"
@@ -666,23 +763,9 @@ export default function PerfilPage() {
                     <Input
                       value={userProfile.country || ''}
                       placeholder={userProfile.country ? undefined : 'sin datos'}
-                      onChange={async (e) => {
+                      onChange={(e) => {
                         const newCountry = e.target.value
                         setUserProfile(prev => ({ ...prev, country: newCountry }))
-                        if (session?.user?.email) {
-                          const { data, error } = await supabase
-                            .from('usuarios')
-                            .update({ pais: newCountry })
-                            .eq('email', session.user.email)
-                            .select()
-                            .maybeSingle()
-                          console.log('[Perfil] Actualización pais:', { newCountry, data, error })
-                          if (error) {
-                            console.error('[Perfil] Error al actualizar pais en Supabase:', error)
-                          }
-                        } else {
-                          console.warn('[Perfil] No hay email de sesión disponible para actualizar pais')
-                        }
                       }}
                       disabled={!isEditingProfile}
                       className="mt-1"
@@ -741,12 +824,23 @@ export default function PerfilPage() {
           <TabsContent value="facturacion" className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle>Datos de Facturación</CardTitle>
+                <CardTitle>Datos de Facturación
+                {facturacionRegistros.length > 0 && (() => {
+                  const info = mapRecordToBillingInfo(facturacionRegistros[0])
+                  return (
+                    <span className="ml-2 text-base text-gray-700">
+                      • {info.legalName || 'Sin razón social'}
+                      {info.taxId ? ` — RUT: ${info.taxId}` : ''}
+                    </span>
+                  )
+                })()}
+                </CardTitle>
                 <p className="text-sm text-gray-600">
                   Información utilizada para generar tus facturas
                 </p>
               </CardHeader>
               <CardContent className="space-y-6">
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <Label className="text-sm font-medium text-gray-700">Razón Social</Label>
@@ -793,7 +887,7 @@ export default function PerfilPage() {
                     <Label className="text-sm font-medium text-gray-700">País</Label>
                     <Select value={billingInfo.country} onValueChange={(value) => setBillingInfo({...billingInfo, country: value})}>
                       <SelectTrigger className="mt-1">
-                        <SelectValue />
+                        <SelectValue  />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="Chile">Chile</SelectItem>
@@ -1064,9 +1158,8 @@ export default function PerfilPage() {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="user">Usuario</SelectItem>
-                            <SelectItem value="operator">Operador</SelectItem>
-                            <SelectItem value="admin">Administrador</SelectItem>
+                            <SelectItem value="administrador">Administrador</SelectItem>
+                            <SelectItem value="super-administrador">Super Administrador</SelectItem>
                           </SelectContent>
                         </Select>
                         <p className="text-xs text-gray-500 mt-1">
@@ -1189,6 +1282,52 @@ export default function PerfilPage() {
             </Card>
           </TabsContent>
         </Tabs>
+        {userProfile.role === 'super-administrador' && (
+          <Card className="mt-6">
+            <CardHeader>
+              <CardTitle>Agregar Usuario</CardTitle>
+              <p className="text-sm text-gray-600 mt-1">Crea un nuevo usuario proporcionando su email y una contraseña.</p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <Label className="text-sm font-medium text-gray-700">Email</Label>
+                <Input
+                  type="email"
+                  value={addUserEmail}
+                  onChange={(e) => setAddUserEmail(e.target.value)}
+                  placeholder="usuario@ejemplo.com"
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label className="text-sm font-medium text-gray-700">Contraseña</Label>
+                <Input
+                  type="password"
+                  value={addUserPassword}
+                  onChange={(e) => setAddUserPassword(e.target.value)}
+                  className="mt-1"
+                  placeholder="Ingresa una contraseña"
+                />
+              </div>
+              <div>
+                <Label className="text-sm font-medium text-gray-700">Rol</Label>
+                <Select value={addUserRole} onValueChange={(value) => setAddUserRole(value)}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Selecciona un rol" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="administrador">Administrador</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex justify-end">
+                <Button onClick={handleAddUser} disabled={isLoading || !addUserEmail || !addUserPassword || !addUserRole}>
+                  {isLoading ? 'Agregando...' : 'Agregar Usuario'}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </main>
     </div>
   )

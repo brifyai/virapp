@@ -20,6 +20,8 @@ interface AudioLibraryItem {
   genero?: string
   idioma?: string
   descripcion?: string
+  // Nuevo campo opcional para reflejar la columna recientemente agregada
+  usuario?: string
 }
 
 interface AdCampaign {
@@ -80,10 +82,25 @@ export default function BibliotecasPage() {
         setLoading(true)
         setError(null)
         
-        // Obtener datos de la biblioteca de audio
-        const { data: audioData, error: audioError } = await supabase
+        // Leer email almacenado en LocalStorage para filtrar por usuario
+        let storedEmail: string | null = null
+        try {
+          storedEmail = typeof window !== 'undefined' ? localStorage.getItem('vira_user_email') : null
+        } catch (e) {
+          console.warn('[Bibliotecas] No se pudo leer vira_user_email de LocalStorage:', e)
+        }
+
+        // Construir consulta a la biblioteca de audio, filtrando por la columna "usuario"
+        let audioQuery = supabase
           .from('biblioteca_audio')
           .select('*')
+
+        if (storedEmail && storedEmail.trim() !== '') {
+          // Incluir registros del usuario y los globales (usuario = "todos")
+          audioQuery = audioQuery.or(`usuario.eq.${storedEmail},usuario.eq.todos`)
+        }
+
+        const { data: audioData, error: audioError } = await audioQuery
           .order('id', { ascending: false })
         
         if (audioError) {

@@ -1,7 +1,7 @@
 
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
@@ -22,6 +22,7 @@ import {
   Clock
 } from 'lucide-react'
 import { useSession, signOut } from 'next-auth/react'
+import { supabase } from '@/lib/supabase'
 
 const navigationItems = [
   {
@@ -75,6 +76,52 @@ export function Navigation() {
   const pathname = usePathname()
   const { data: session } = useSession() || {}
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
+  const [storedEmail, setStoredEmail] = useState<string | null>(null)
+  const [usuarioData, setUsuarioData] = useState<any | null>(null)
+
+  useEffect(() => {
+    try {
+      const email = localStorage.getItem('vira_user_email')
+      if (email) setStoredEmail(email)
+    } catch (err) {
+      console.error('No se pudo leer vira_user_email de LocalStorage:', err)
+    }
+
+    const handler = (e: any) => {
+      const email = e?.detail?.email
+      if (typeof email === 'string') setStoredEmail(email)
+    }
+    window.addEventListener('vira:email', handler)
+    return () => window.removeEventListener('vira:email', handler)
+  }, [])
+
+  // Consultar al backend de Supabase la tabla 'usuarios' con el storedEmail y loguear el resultado
+  useEffect(() => {
+    if (!storedEmail) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { data, error } = await supabase
+          .from('usuarios')
+          .select('*')
+          .eq('email', storedEmail)
+          .maybeSingle()
+
+        if (error) {
+          console.error('[VIRA] Error consultando usuarios por email:', error)
+        } else if (!cancelled) {
+          console.log('[VIRA] Usuario desde Supabase (usuarios):', data)
+          setUsuarioData(data || null)
+        }
+      } catch (err) {
+        console.error('[VIRA] Error inesperado consultando usuarios:', err)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [storedEmail])
 
   const handleSignOut = () => {
     signOut({ callbackUrl: '/auth/signin' })
@@ -125,10 +172,10 @@ export function Navigation() {
               </div>
               <div className="hidden md:block text-left">
                 <div className="text-sm font-medium text-gray-900">
-                  {(session?.user as any)?.nombre_completo ?? session?.user?.name ?? 'Usuario'}
+                  {usuarioData?.nombre_completo ?? usuarioData?.full_name ?? 'Usuario'}
                 </div>
                 <div className="text-xs text-gray-500">
-                  {session?.user?.email || 'usuario@vira.cl'}
+                  {storedEmail || 'usuario@vira.cl'}
                 </div>
               </div>
             </button>
@@ -139,10 +186,10 @@ export function Navigation() {
                 <div className="py-1">
                   <div className="px-4 py-3 border-b border-gray-100">
                     <p className="text-sm font-medium text-gray-900">
-                      {(session?.user as any)?.nombre_completo ?? session?.user?.name ?? 'Usuario'}
+                      {usuarioData?.nombre_completo ?? usuarioData?.full_name ?? 'Usuario'}
                     </p>
                     <p className="text-xs text-gray-500">
-                      {session?.user?.email || 'usuario@vira.cl'}
+                      {storedEmail ?? 'usuario@vira.cl'}
                     </p>
                   </div>
                   
