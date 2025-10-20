@@ -1,0 +1,3 @@
+# Ignorar dependencias y artefactos de build
+node_modules/
+.next/
